@@ -12,7 +12,7 @@ public class MonitorServiceImpl implements IMonitorService {
     private static final int CPUTIME = 3;
     private static final int PERCENT = 100;
     private static final int FAULTLENGTH = 10;
-    private static String linuxVersion = null;
+    private static String linuxVersion = "2.4 64bit";
 
     
     public MonitorInfoBean getMonitorInfoBean() throws Exception {
@@ -29,64 +29,84 @@ public class MonitorServiceImpl implements IMonitorService {
         infoBean.setCpuRatio(cpuRatio);
         return infoBean;
     }
-
-    private static double getCpuRateForLinux() {
+    
+    private static double getCpuRateForLinux() {  
+        double cpuUsage = 0;  
+        Process pro1,pro2;  
         InputStream is = null;
         InputStreamReader isr = null;
-        BufferedReader brStat = null;
-        StringTokenizer tokenStat = null;
-        try {
-            System.out.println("Get usage rate of CUP , linux version: "
-                    + linuxVersion);
-            Process process = Runtime.getRuntime().exec("top -b -n 1");
-            is = process.getInputStream();
+        BufferedReader in1 = null;
+        InputStream is2 = null;
+        InputStreamReader isr2 = null;
+        BufferedReader in2 = null;
+        Runtime r = Runtime.getRuntime();  
+        try {  
+            String command = "cat /proc/stat";  
+            //第一次采集CPU时间  
+            long startTime = System.currentTimeMillis();  
+            pro1 = r.exec(command);  
+            
+            is = pro1.getInputStream();
             isr = new InputStreamReader(is);
-            brStat = new BufferedReader(isr);
-            if (linuxVersion.equals("2.4")) {
-                brStat.readLine();
-                brStat.readLine();
-                brStat.readLine();
-                brStat.readLine();
-                tokenStat = new StringTokenizer(brStat.readLine());
-                tokenStat.nextToken();
-                tokenStat.nextToken();
-                String user = tokenStat.nextToken();
-                tokenStat.nextToken();
-                String system = tokenStat.nextToken();
-                tokenStat.nextToken();
-                String nice = tokenStat.nextToken();
-                System.out.println(user + " , " + system + " , " + nice);
-                user = user.substring(0, user.indexOf("%"));
-                system = system.substring(0, system.indexOf("%"));
-                nice = nice.substring(0, nice.indexOf("%"));
-                float userUsage = new Float(user).floatValue();
-                float systemUsage = new Float(system).floatValue();
-                float niceUsage = new Float(nice).floatValue();
-                return (userUsage + systemUsage + niceUsage) / 100;
-            } else {
-                brStat.readLine();
-                brStat.readLine();
-                tokenStat = new StringTokenizer(brStat.readLine());
-                tokenStat.nextToken();
-                tokenStat.nextToken();
-                tokenStat.nextToken();
-                tokenStat.nextToken();
-                tokenStat.nextToken();
-                tokenStat.nextToken();
-                tokenStat.nextToken();
-                String cpuUsage = tokenStat.nextToken();
-                System.out.println("CPU idle : " + cpuUsage);
-                Float usage = new Float(cpuUsage.substring(0, cpuUsage
-                        .indexOf("%")));
-                return (1 - usage.floatValue() / 100);
-            }
-        } catch (IOException ioe) {
-            System.out.println(ioe.getMessage());
-            freeResource(is, isr, brStat);
-            return 1;
-        } finally {
-            freeResource(is, isr, brStat);
-        }
+            in1 = new BufferedReader(isr);
+            String line = null;  
+            long idleCpuTime1 = 0, totalCpuTime1 = 0;   //分别为系统启动后空闲的CPU时间和总的CPU时间  
+            while((line=in1.readLine()) != null){     
+                if(line.startsWith("cpu")){  
+                    line = line.trim();  
+                    String[] temp = line.split("\\s+");   
+                    idleCpuTime1 = Long.parseLong(temp[4]);  
+                    for(String s : temp){  
+                        if(!s.equals("cpu")){  
+                            totalCpuTime1 += Long.parseLong(s);  
+                        }  
+                    }     
+                    break;  
+                }                         
+            }     
+            in1.close();  
+            pro1.destroy();  
+            try {  
+                Thread.sleep(100);  
+            } catch (InterruptedException ioe) {  
+            	System.out.println(ioe.getMessage());
+                freeResource(is, isr, in1);
+                return 1;
+            }  
+            //第二次采集CPU时间  
+            long endTime = System.currentTimeMillis();  
+            pro2 = r.exec(command);  
+            
+            is2 = pro2.getInputStream();
+            isr2 = new InputStreamReader(is2);
+            in2 = new BufferedReader(isr2); 
+            long idleCpuTime2 = 0, totalCpuTime2 = 0;   //分别为系统启动后空闲的CPU时间和总的CPU时间  
+            while((line=in2.readLine()) != null){     
+                if(line.startsWith("cpu")){  
+                    line = line.trim();  
+                    String[] temp = line.split("\\s+");   
+                    idleCpuTime2 = Long.parseLong(temp[4]);  
+                    for(String s : temp){  
+                        if(!s.equals("cpu")){  
+                            totalCpuTime2 += Long.parseLong(s);  
+                        }  
+                    }  
+                    break;    
+                }                                 
+            }  
+            if(idleCpuTime1 != 0 && totalCpuTime1 !=0 && idleCpuTime2 != 0 && totalCpuTime2 !=0 && totalCpuTime2 != totalCpuTime1){  
+                cpuUsage = 1 - (double)(idleCpuTime2 - idleCpuTime1)/(double)(totalCpuTime2 - totalCpuTime1);  
+            }   
+            System.out.println("CPU Usage : " + cpuUsage + " idle :" + (double)(idleCpuTime2 - idleCpuTime1) + " total :" + (double)(totalCpuTime2 - totalCpuTime1));
+            System.out.println("strattime " + startTime + " endtime :" + endTime);
+            in2.close();  
+            pro2.destroy();  
+        } catch (IOException ioe) {  
+        	System.out.println(ioe.getMessage());
+            freeResource(is2, isr2, in2);
+            return 1; 
+        }     
+        return cpuUsage*100;  
     }
 
     private static void freeResource(InputStream is, InputStreamReader isr,
@@ -188,20 +208,18 @@ public class MonitorServiceImpl implements IMonitorService {
         }
         return null;
     }
-
+    
     public void setCPUrate(int rate){
     	long startTime = 0; 
         int busyTime = 100000; 
-        int idleTime = 3;
-        MonitorInfoBean monitorInfo;
 		try {
-			monitorInfo = this.getMonitorInfoBean();
 			startTime = System.currentTimeMillis();
+			
 			if(rate<=100 && rate > 0){
 				while(System.currentTimeMillis() - startTime <= busyTime){
-		    		if(monitorInfo.getCpuRatio() > rate){
-		    			Thread.sleep(idleTime);
-		    		}
+					long start = System.currentTimeMillis();
+					while(System.currentTimeMillis() - start <= rate){}
+					Thread.sleep(100-rate);
 		    	}
 			}
 		} catch (Exception e) {
